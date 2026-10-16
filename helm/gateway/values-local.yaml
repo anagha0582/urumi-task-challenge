@@ -1,0 +1,11 @@
+
+gateway:
+  image:
+    repository: urumi-gateway
+    tag: local
+    pullPolicy: IfNotPresent
+
+ingress:
+  enabled: true
+  className: traefik
+  host: gateway.localhost

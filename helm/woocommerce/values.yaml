@@ -1,0 +1,48 @@
+host: store.localhost
+
+# Reference a Kubernetes Secret created separately. Do not put passwords here.
+existingSecret: store-secrets
+
+# Empty means use the cluster's default StorageClass.
+storageClass: ""
+
+ingress:
+  className: traefik
+  annotations: {}
+  tls:
+    enabled: false
+    secretName: store-tls
+
+site:
+  title: "Urumi Store"
+  adminUser: admin
+  adminEmail: admin@example.com
+  currency: USD
+
+wordpress:
+  image: wordpress:6.6-apache
+  cliImage: wordpress:cli
+  storage: 5Gi
+  resources:
+    requests:
+      cpu: 200m
+      memory: 384Mi
+    limits:
+      cpu: "1"
+      memory: 768Mi
+
+mariadb:
+  image: mariadb:11.4
+  storage: 5Gi
+  database: wordpress
+  user: wordpress
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+networkPolicy:
+  enabled: true

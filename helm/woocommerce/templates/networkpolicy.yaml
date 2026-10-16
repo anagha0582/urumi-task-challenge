@@ -1,0 +1,56 @@
+
+{{- if .Values.networkPolicy.enabled }}
+# MariaDB: only WordPress and the setup Job may connect
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-mariadb
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: mariadb
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/component
+                operator: In
+                values:
+                  - wordpress
+                  - setup
+      ports:
+        - port: 3306
+
+---
+# WordPress: allow Traefik and the WooCommerce MCP server
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-wordpress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: wordpress
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        # Allow Traefik in kube-system
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+
+        # Allow only the WooCommerce MCP pod in urumi-gateway
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: urumi-gateway
+          podSelector:
+            matchLabels:
+              app: woocommerce-mcp
+      ports:
+        - port: 80
+{{- end }}

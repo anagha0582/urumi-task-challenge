@@ -1,0 +1,9 @@
+host: store.localhost
+
+storageClass: ""
+
+wordpress:
+  storage: 2Gi
+
+mariadb:
+  storage: 2Gi

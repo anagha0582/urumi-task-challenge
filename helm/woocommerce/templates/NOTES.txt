@@ -1,0 +1,9 @@
+
+Store:  {{ include "store.url" . }}
+Admin:  {{ include "store.url" . }}/wp-admin   (user: {{ .Values.site.adminUser }})
+
+Password:
+  kubectl -n {{ .Release.Namespace }} get secret {{ .Values.existingSecret }} -o jsonpath='{.data.wp-admin-password}' | base64 -d; echo
+
+Setup progress:
+  kubectl -n {{ .Release.Namespace }} logs -f job/{{ .Release.Name }}-setup

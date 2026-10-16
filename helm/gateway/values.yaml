@@ -1,0 +1,32 @@
+
+gateway:
+  image:
+    repository: urumi-gateway
+    tag: local
+    pullPolicy: IfNotPresent
+  replicas: 1
+  port: 8080
+  service:
+    type: ClusterIP
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+postgres:
+  image:
+    repository: postgres
+    tag: "16-alpine"
+  database: urumi
+  username: urumi
+  port: 5432
+  storage:
+    size: 2Gi
+
+ingress:
+  enabled: true
+  className: traefik
+  host: gateway.localhost
