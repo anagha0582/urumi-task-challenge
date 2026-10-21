@@ -29,6 +29,17 @@ const toolCache = new Map<
   { expiresAt: number; tools: UpstreamTool[] }
 >();
 
+// Return cached tools for dashboard display without making upstream calls.
+export function getCachedTools(serverId: string): UpstreamTool[] {
+  const cached = toolCache.get(serverId);
+
+  if (!cached || cached.expiresAt <= Date.now()) {
+    return [];
+  }
+
+  return cached.tools;
+}
+
 export function withTimeout<T>(
   promise: Promise<T>,
   timeoutMs: number,
@@ -67,6 +78,7 @@ export function withTimeout<T>(
     );
   });
 }
+
 function makeHeaders(
   server: UpstreamServer,
 ): Record<string, string> | undefined {
@@ -135,6 +147,7 @@ async function withClient<T>(
     }
   }
 }
+
 export async function listUpstreamTools(
   server: UpstreamServer,
   forceRefresh = false,
@@ -233,7 +246,3 @@ export function validateSeedServer(server: SeedServer): void {
 
   validateServerUrl(server.url);
 }
-
-
-
-

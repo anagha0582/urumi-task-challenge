@@ -1,0 +1,23 @@
+image:
+  repository: urumi-dashboard
+  tag: local
+  pullPolicy: IfNotPresent
+
+replicas: 1
+port: 80
+
+service:
+  type: ClusterIP
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 250m
+    memory: 128Mi
+
+ingress:
+  enabled: true
+  className: traefik
+  host: dashboard.localhost

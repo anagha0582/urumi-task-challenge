@@ -23,6 +23,13 @@ spec:
             - name: http
               containerPort: {{ .Values.gateway.port }}
           env:
+            - name: GEMINI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: urumi-llm-secrets
+                  key: GEMINI_API_KEY
+            - name: GEMINI_MODEL
+              value: "gemini-3.6-flash"
             - name: NODE_ENV
               value: production
             - name: PORT

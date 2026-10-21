@@ -1,0 +1,39 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: inventory-mcp-ingress
+  namespace: urumi-gateway
+spec:
+  podSelector:
+    matchLabels:
+      app: inventory-mcp
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: urumi-gateway
+      ports:
+        - protocol: TCP
+          port: 3000
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: support-mcp-ingress
+  namespace: urumi-gateway
+spec:
+  podSelector:
+    matchLabels:
+      app: support-mcp
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: urumi-gateway
+      ports:
+        - protocol: TCP
+          port: 3000

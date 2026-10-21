@@ -42,7 +42,7 @@ async function getEnabledServers(): Promise<UpstreamServer[]> {
   return result.rows;
 }
 
-async function buildToolList() {
+export async function buildToolList() {
   const servers = await getEnabledServers();
 
   const results = await Promise.allSettled(
@@ -81,7 +81,7 @@ async function buildToolList() {
   return tools;
 }
 
-async function handleToolCall(
+export async function handleToolCall(
   name: string,
   args: Record<string, unknown>,
   userId: string,

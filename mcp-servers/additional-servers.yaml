@@ -1,0 +1,111 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inventory-mcp
+  namespace: urumi-gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: inventory-mcp
+  template:
+    metadata:
+      labels:
+        app: inventory-mcp
+    spec:
+      containers:
+        - name: inventory-mcp
+          image: urumi-inventory-mcp:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 3000
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: inventory-mcp
+  namespace: urumi-gateway
+spec:
+  type: ClusterIP
+  selector:
+    app: inventory-mcp
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: support-mcp
+  namespace: urumi-gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: support-mcp
+  template:
+    metadata:
+      labels:
+        app: support-mcp
+    spec:
+      containers:
+        - name: support-mcp
+          image: urumi-support-mcp:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 3000
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: support-mcp
+  namespace: urumi-gateway
+spec:
+  type: ClusterIP
+  selector:
+    app: support-mcp
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http

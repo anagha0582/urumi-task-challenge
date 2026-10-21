@@ -1,4 +1,5 @@
-﻿
+import { chatRouter } from "./chat.js";
+
 import express, { type Request, type Response } from "express";
 
 import { pool } from "./db.js";
@@ -11,7 +12,11 @@ import {
   encryptCredential,
 } from "./crypto.js";
 
-import { clearToolCache, validateServerUrl } from "./upstream.js";
+import {
+  clearToolCache,
+  getCachedTools,
+  validateServerUrl,
+} from "./upstream.js";
 
 export const apiRouter = express.Router();
 
@@ -27,11 +32,91 @@ apiRouter.get("/me", (req: Request, res: Response) => {
   });
 });
 
+// List the authenticated user's own API keys.
+apiRouter.get("/me/keys", async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, name,
+              created_at AS "createdAt",
+              revoked_at AS "revokedAt"
+       FROM api_keys
+       WHERE user_id = $1
+       ORDER BY created_at DESC`,
+      [req.auth!.user.id],
+    );
+
+    res.json({ keys: result.rows });
+  } catch (error) {
+    console.error("Failed to list own keys:", error);
+    res.status(500).json({ error: "Failed to list keys" });
+  }
+});
+
+// Create an API key for the authenticated user.
+// The plaintext key is returned only once.
+apiRouter.post("/me/keys", async (req, res) => {
+  const { name } = req.body ?? {};
+
+  if (name !== undefined && typeof name !== "string") {
+    res.status(400).json({ error: "Key name must be a string" });
+    return;
+  }
+
+  const apiKey = generateApiKey();
+
+  try {
+    const result = await pool.query(
+      `INSERT INTO api_keys (user_id, key_hash, name)
+       VALUES ($1, $2, $3)
+       RETURNING id, name, created_at AS "createdAt"`,
+      [
+        req.auth!.user.id,
+        hashApiKey(apiKey),
+        (name?.trim() || "My key").slice(0, 60),
+      ],
+    );
+
+    res.status(201).json({
+      apiKey: { ...result.rows[0], key: apiKey },
+    });
+  } catch (error) {
+    console.error("Failed to create own key:", error);
+    res.status(500).json({ error: "Failed to create key" });
+  }
+});
+
+// Revoke only an API key belonging to the authenticated user.
+apiRouter.delete("/me/keys/:id", async (req, res) => {
+  try {
+    const result = await pool.query(
+      `UPDATE api_keys
+       SET revoked_at = NOW()
+       WHERE id = $1
+         AND user_id = $2
+         AND revoked_at IS NULL
+       RETURNING id`,
+      [req.params.id, req.auth!.user.id],
+    );
+
+    if (result.rows.length === 0) {
+      res.status(404).json({ error: "Active API key not found" });
+      return;
+    }
+
+    res.json({ revoked: true });
+  } catch (error) {
+    console.error("Failed to revoke own key:", error);
+    res.status(500).json({ error: "Failed to revoke key" });
+  }
+});
+
 // List upstream servers. Never return encrypted credentials.
 apiRouter.get("/servers", requireAdmin, async (_req, res) => {
   try {
     const result = await pool.query(
-      `SELECT id, slug, name, url, enabled, status,
+      `SELECT id, slug, name, url, enabled,
+              CASE WHEN enabled THEN status ELSE 'disabled' END AS status,
+              credential_header AS "credentialHeader",
               last_checked_at AS "lastCheckedAt",
               created_at AS "createdAt",
               updated_at AS "updatedAt",
@@ -40,7 +125,15 @@ apiRouter.get("/servers", requireAdmin, async (_req, res) => {
        ORDER BY slug`,
     );
 
-    res.json({ servers: result.rows });
+    res.json({
+      servers: result.rows.map((row) => ({
+        ...row,
+        tools: getCachedTools(row.id).map((tool) => ({
+          name: tool.name,
+          description: tool.description ?? "",
+        })),
+      })),
+    });
   } catch (error) {
     console.error("Failed to list servers:", error);
     res.status(500).json({ error: "Failed to list servers" });
@@ -104,6 +197,8 @@ apiRouter.post("/servers", requireAdmin, async (req, res) => {
       ],
     );
 
+    clearToolCache(result.rows[0].id);
+
     res.status(201).json({
       server: {
         ...result.rows[0],
@@ -145,6 +240,8 @@ apiRouter.patch("/servers/:id", requireAdmin, async (req, res) => {
     return;
   }
 
+  let normalizedUrl: string | undefined;
+
   if (url !== undefined) {
     try {
       if (typeof url !== "string") {
@@ -152,7 +249,7 @@ apiRouter.patch("/servers/:id", requireAdmin, async (req, res) => {
         return;
       }
 
-      validateServerUrl(url);
+      normalizedUrl = validateServerUrl(url).toString();
     } catch {
       res.status(400).json({ error: "Invalid URL" });
       return;
@@ -210,12 +307,14 @@ apiRouter.patch("/servers/:id", requireAdmin, async (req, res) => {
          enabled = COALESCE($7, enabled),
          updated_at = NOW()
        WHERE id = $1
-       RETURNING id, slug, name, url, enabled, status,
+       RETURNING id, slug, name, url, enabled,
+                 CASE WHEN enabled THEN status ELSE 'disabled' END AS status,
+                 credential_header AS "credentialHeader",
                  credential_encrypted IS NOT NULL AS "hasCredential"`,
       [
         req.params.id,
         name === undefined ? null : name.trim(),
-        url ?? null,
+        normalizedUrl ?? null,
         credential !== undefined && credential.length > 0,
         encrypted ?? null,
         credentialHeader ?? null,
@@ -252,15 +351,24 @@ apiRouter.delete("/servers/:id", requireAdmin, async (req, res) => {
   }
 });
 
-// List users.
+// List users and their API-key metadata. Never return key hashes.
 apiRouter.get("/users", requireAdmin, async (_req, res) => {
   try {
     const result = await pool.query(
       `SELECT u.id, u.email, u.role, u.created_at AS "createdAt",
-              COUNT(k.id)::int AS "activeKeyCount"
+              COALESCE(
+                json_agg(
+                  json_build_object(
+                    'id', k.id,
+                    'name', k.name,
+                    'createdAt', k.created_at,
+                    'revokedAt', k.revoked_at
+                  ) ORDER BY k.created_at
+                ) FILTER (WHERE k.id IS NOT NULL),
+                '[]'::json
+              ) AS keys
        FROM users u
-       LEFT JOIN api_keys k
-         ON k.user_id = u.id AND k.revoked_at IS NULL
+       LEFT JOIN api_keys k ON k.user_id = u.id
        GROUP BY u.id
        ORDER BY u.created_at DESC`,
     );
@@ -344,7 +452,11 @@ apiRouter.post("/users/:id/keys", requireAdmin, async (req, res) => {
        SELECT id, $2, $3 FROM users WHERE id = $1
        RETURNING id, user_id AS "userId", name,
                  created_at AS "createdAt"`,
-      [req.params.id, hashApiKey(apiKey), name || "API key"],
+      [
+        req.params.id,
+        hashApiKey(apiKey),
+        (name?.trim() || "API key").slice(0, 60),
+      ],
     );
 
     if (result.rows.length === 0) {
@@ -361,7 +473,7 @@ apiRouter.post("/users/:id/keys", requireAdmin, async (req, res) => {
   }
 });
 
-// Revoke an API key immediately.
+// Revoke an API key immediately. Admin-only route.
 apiRouter.delete("/keys/:id", requireAdmin, async (req, res) => {
   try {
     const result = await pool.query(
@@ -414,3 +526,6 @@ apiRouter.get("/audit-log", requireAdmin, async (req, res) => {
   }
 });
 
+
+// Authenticated chat endpoint; apiRouter already applies requireAuth.
+apiRouter.use("/chat", chatRouter);
