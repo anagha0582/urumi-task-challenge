@@ -39,11 +39,12 @@ async function request<T>(
   path: string,
   options: RequestInit = {},
   suppliedKey?: string,
+  timeoutMs = REQUEST_TIMEOUT_MS,
 ): Promise<T> {
   const controller = new AbortController()
   const timeout = window.setTimeout(
     () => controller.abort(),
-    REQUEST_TIMEOUT_MS,
+    timeoutMs,
   )
 
   try {
@@ -106,6 +107,18 @@ const json = (method: string, body?: unknown): RequestInit => ({
   ...(body === undefined ? {} : { body: JSON.stringify(body) }),
 })
 
+export interface ChatToolCall {
+  name: string
+  arguments: Record<string, unknown>
+  result: string
+  success: boolean
+}
+
+export interface ChatResponse {
+  reply: string
+  toolCalls: ChatToolCall[]
+}
+
 export const api = {
   authenticate: (key: string) => request<AuthResponse>('/me', {}, key),
   me: () => request<AuthResponse>('/me'),
@@ -141,6 +154,13 @@ export const api = {
     request<{ revoked: boolean }>(`/me/keys/${encodeURIComponent(keyId)}`, json('DELETE')),
   audit: (limit = 200) =>
     request<{ events: AuditEvent[] }>(`/audit-log?limit=${limit}`),
+  chat: (message: string) =>
+    request<ChatResponse>(
+      '/chat',
+      json('POST', { message }),
+      undefined,
+      120000,
+    ),
 }
 
 export function userFacingError(error: unknown): string {

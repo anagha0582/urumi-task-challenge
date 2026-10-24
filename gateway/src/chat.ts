@@ -10,6 +10,34 @@ const MAX_MESSAGE_LENGTH = 4000;
 const MODEL = process.env.GEMINI_MODEL ?? "gemini-3.8-flash";
 const MAX_GEMINI_RETRIES = 2;
 const GEMINI_RETRY_DELAY_MS = 250;
+const TRANSIENT_GEMINI_NETWORK_CODES = new Set([
+  "ECONNRESET",
+  "ENOTFOUND",
+  "ETIMEDOUT",
+  "EAI_AGAIN",
+  "ECONNREFUSED",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+  "UND_ERR_CONNECT_TIMEOUT",
+  "UND_ERR_SOCKET",
+  "UND_ERR_HEADERS_TIMEOUT",
+  "UND_ERR_BODY_TIMEOUT",
+]);
+const SAFE_GEMINI_ERROR_CODES = new Set([
+  ...TRANSIENT_GEMINI_NETWORK_CODES,
+  "ERR_TLS_CERT_ALTNAME_INVALID",
+  "CERT_HAS_EXPIRED",
+  "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+]);
+const SAFE_ERROR_NAMES = new Set([
+  "Error",
+  "TypeError",
+  "AbortError",
+  "TimeoutError",
+  "RangeError",
+  "SyntaxError",
+  "GeminiRequestError",
+]);
 
 const UNSUPPORTED_SCHEMA_FIELDS = new Set([
   "$schema",
@@ -92,14 +120,52 @@ type GeminiPayload = {
 class GeminiRequestError extends Error {
   constructor(
     readonly model: string,
-    readonly status: number,
+    readonly status: number | undefined,
     readonly availabilityExhausted: boolean,
   ) {
-    super(`Gemini request failed for ${model} (HTTP ${status})`);
+    super(
+      status === undefined
+        ? `Gemini request failed for ${model}`
+        : `Gemini request failed for ${model} (HTTP ${status})`,
+    );
+    this.name = "GeminiRequestError";
   }
 }
 
-async function requestGemini(
+function safeErrorName(error: unknown): string {
+  if (!(error instanceof Error)) return "UnknownError";
+  return SAFE_ERROR_NAMES.has(error.name) ? error.name : "UnknownError";
+}
+
+function getGeminiNetworkErrorCode(error: unknown): string | undefined {
+  let current = error;
+
+  for (let depth = 0; depth < 3; depth++) {
+    if (typeof current !== "object" || current === null) return undefined;
+
+    if ("code" in current && typeof current.code === "string") {
+      if (SAFE_GEMINI_ERROR_CODES.has(current.code)) {
+        return current.code;
+      }
+    }
+
+    current = "cause" in current ? current.cause : undefined;
+  }
+
+  return undefined;
+}
+
+function isTransientGeminiNetworkError(error: unknown): boolean {
+  const code = getGeminiNetworkErrorCode(error);
+  if (code) return TRANSIENT_GEMINI_NETWORK_CODES.has(code);
+
+  return (
+    error instanceof TypeError &&
+    error.message === "fetch failed"
+  ) || (error instanceof DOMException && error.name === "TimeoutError");
+}
+
+export async function requestGemini(
   requestBody: Record<string, unknown>,
   apiKey: string,
 ): Promise<GeminiPayload> {
@@ -107,23 +173,44 @@ async function requestGemini(
     MODEL === "gemini-3.6-flash"
       ? [MODEL, "gemini-3.5-flash", "gemini-3.5-flash-lite"]
       : [MODEL];
-  let lastFailure: { model: string; status: number } | undefined;
+  let lastFailure: { model: string; status?: number } | undefined;
 
   for (let modelIndex = 0; modelIndex < models.length; modelIndex++) {
     const model = models[modelIndex];
     for (let retry = 0; retry <= MAX_GEMINI_RETRIES; retry++) {
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-goog-api-key": apiKey,
+      let response: Awaited<ReturnType<typeof fetch>>;
+      try {
+        response = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-goog-api-key": apiKey,
+            },
+            body: JSON.stringify(requestBody),
+            signal: AbortSignal.timeout(45000),
           },
-          body: JSON.stringify(requestBody),
-          signal: AbortSignal.timeout(45000),
-        },
-      );
+        );
+      } catch (error) {
+        const errorCode = getGeminiNetworkErrorCode(error);
+        console.warn("[chat] Gemini request failed", {
+          stage: "gemini_generate",
+          model,
+          errorName: safeErrorName(error),
+          ...(errorCode ? { errorCode } : {}),
+        });
+
+        if (!isTransientGeminiNetworkError(error)) throw error;
+
+        lastFailure = { model };
+        if (retry < MAX_GEMINI_RETRIES) {
+          await new Promise((resolve) =>
+            setTimeout(resolve, GEMINI_RETRY_DELAY_MS * 2 ** retry),
+          );
+        }
+        continue;
+      }
 
       if (response.ok) {
         return (await response.json()) as GeminiPayload;
@@ -361,10 +448,9 @@ chatRouter.post("/", async (req: Request, res: Response) => {
       return;
     }
 
-    console.error(
-      "Chat request failed:",
-      error instanceof Error ? error.message : "Unknown error",
-    );
+    console.error("[chat] Chat request failed", {
+      errorName: safeErrorName(error),
+    });
 
     res.status(502).json({
       error: "Chat request failed. Please try again.",

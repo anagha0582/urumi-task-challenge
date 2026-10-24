@@ -8,11 +8,13 @@ import {
   Users,
   KeyRound,
   Menu,
+  MessageSquare,
   X,
 } from 'lucide-react'
 import { api, clearApiKey, readApiKey, saveApiKey } from './api'
 import { Toast } from './components'
 import { AuditPage } from './pages/AuditPage'
+import { ChatPage } from './pages/ChatPage'
 import { KeysPage } from './pages/KeysPage'
 import { LoginPage } from './pages/LoginPage'
 import { OverviewPage } from './pages/OverviewPage'
@@ -21,7 +23,7 @@ import { UsersPage } from './pages/UsersPage'
 import type { AuthResponse } from './types'
 import './App.css'
 
-type Page = 'overview' | 'servers' | 'users' | 'audit' | 'keys'
+type Page = 'overview' | 'servers' | 'users' | 'audit' | 'keys' | 'chat'
 type ToastMessage = { message: string; kind: 'success' | 'error' }
 
 const pageDetails: Record<Page, { title: string; description: string }> = {
@@ -30,6 +32,7 @@ const pageDetails: Record<Page, { title: string; description: string }> = {
   users: { title: 'Users & API Keys', description: 'Manage user access and gateway API credentials.' },
   audit: { title: 'Audit Logs', description: 'Review recent activity across your gateway.' },
   keys: { title: 'My API Keys', description: 'Create and manage credentials for your account.' },
+  chat: { title: 'Chat', description: 'Ask questions and use tools available through your MCP gateway.' },
 }
 
 function App() {
@@ -98,6 +101,7 @@ function App() {
           { id: 'audit' as const, label: 'Audit Logs', icon: Activity },
         ]
         : []),
+    { id: 'chat', label: 'Chat', icon: MessageSquare },
     { id: 'keys', label: 'My API Keys', icon: KeyRound },
   ]
   const pageInfo = pageDetails[page]
@@ -153,6 +157,7 @@ function App() {
           {page === 'servers' && isAdmin && <ServersPage notify={notify} />}
           {page === 'users' && isAdmin && <UsersPage notify={notify} />}
           {page === 'audit' && isAdmin && <AuditPage />}
+          {page === 'chat' && <ChatPage />}
           {page === 'keys' && <KeysPage user={auth.user} currentKeyId={auth.apiKey.id} onSignOut={signOut} notify={notify} />}
           {toast && <Toast message={toast.message} kind={toast.kind} onClose={() => setToast(null)} />}
         </main>
